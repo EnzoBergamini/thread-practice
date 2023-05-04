@@ -1,0 +1,4 @@
+*.o
+carre
+Makefile
+test-2.sh
