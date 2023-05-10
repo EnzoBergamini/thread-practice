@@ -85,7 +85,7 @@ void *fonction (void *arg){
 
     while(*(a.stop) == FALSE){
         pthread_mutex_lock(a.mutex);
-        while (*(a.print_iter) <= 0){
+        while (*(a.print_iter) <= 0 && *(a.stop) == FALSE){
             pthread_cond_wait(a.cond_inter_thread, a.mutex);
         }
 
