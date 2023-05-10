@@ -50,6 +50,7 @@ typedef struct arg_t {
 
     char *to_print;
     int *print_iter;
+    int *stop;
 
     pthread_cond_t *cond_inter_thread;
     pthread_cond_t *cond_principale;
@@ -84,10 +85,17 @@ void *fonction (void *arg){
 
     //boucle principale
 
-    while(1){
+    while(*(a.stop) == FALSE){
         pthread_mutex_lock(a.mutex);
-        while (*(a.print_iter) <= 0){
+        while (*(a.print_iter) <= 0
+            && *(a.stop) == FALSE   // si on a pas encore affiché et que le programme n'est pas terminé
+            ){
             pthread_cond_wait(a.cond_inter_thread, a.mutex);
+        }
+
+        if (*(a.stop) == TRUE){ // si le programme est terminé on sort de la boucle
+            pthread_mutex_unlock(a.mutex);
+            break;
         }
 
         *(a.print_iter) -= 1;
@@ -116,6 +124,7 @@ int main(int argc, char *argv[]){
     int taille_cote = atoi(argv[3]);
 
     int nb_thread_pret = 0;
+    int stop = FALSE;
 
     pthread_t *tid ;
     tid = calloc (nb_threads, sizeof (pthread_t));
@@ -147,6 +156,7 @@ int main(int argc, char *argv[]){
         arg[i].mutex = &mutex;
         arg[i].to_print = to_print;
         arg[i].print_iter = &print_iter;
+        arg[i].stop = &stop;
     }
 
     for (int i = 0; i < nb_threads; ++i) {
@@ -232,17 +242,22 @@ int main(int argc, char *argv[]){
             }
         }
 
-        pthread_mutex_lock(&mutex);
-        strncpy(to_print, NEWLINE, MAX_SIZE);
-        print_iter = 1;
-        pthread_mutex_unlock(&mutex);
-        pthread_cond_broadcast(&cond_inter_thread);
+        if (i == taille_cote + 1){
+            stop = TRUE;
+            pthread_cond_broadcast(&cond_inter_thread);
+        }else {
+            pthread_mutex_lock(&mutex);
+            strncpy(to_print, NEWLINE, MAX_SIZE);
+            print_iter = 1;
+            pthread_mutex_unlock(&mutex);
+            pthread_cond_broadcast(&cond_inter_thread);
 
-        pthread_mutex_lock(&mutex);
-        while (print_iter > 0){
-            pthread_cond_wait(&cond_principale, &mutex);
+            pthread_mutex_lock(&mutex);
+            while (print_iter > 0) {
+                pthread_cond_wait(&cond_principale, &mutex);
+            }
+            pthread_mutex_unlock(&mutex);
         }
-        pthread_mutex_unlock(&mutex);
     }
 
     for (int i = 0; i < nb_threads; ++i) {
