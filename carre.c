@@ -42,19 +42,25 @@ void raler (int syserr, const char *msg, ...)
 #define TRUE 1
 #define FALSE 0
 
+typedef struct shared_arg_t {
+    int nb_thread_pret;
+
+    char *to_print;
+    int print_iter;
+
+    int stop;
+
+    pthread_cond_t cond_inter_thread;
+    pthread_cond_t cond_principale;
+    pthread_mutex_t mutex;
+} print_t;
+
 typedef struct arg_t {
     int num_thread;
     int delai_max;
-    int *nb_thread_pret;
     int nb_thread;
 
-    char *to_print;
-    int *print_iter;
-    int *stop;
-
-    pthread_cond_t *cond_inter_thread;
-    pthread_cond_t *cond_principale;
-    pthread_mutex_t *mutex;
+    struct shared_arg_t *shared_arg;
 } arg_t;
 
 int alea (int max, unsigned int *seed){
@@ -62,46 +68,57 @@ int alea (int max, unsigned int *seed){
 }
 
 void *fonction (void *arg){
+
+    /* Récupération des arguments */
+
     arg_t a = *(arg_t *) arg;
+
     int delai_max = a.delai_max;
-    int num_thread = a.num_thread;
-    unsigned int seed = num_thread;
+    unsigned int seed = a.num_thread;
+    int nb_thread = a.nb_thread;
 
-    usleep (alea(delai_max, &seed) * 1000); // on attend un temps aléatoire entre 0 et delai_max au début
+    usleep (alea(delai_max, &seed) * 1000);
 
-    // synchronisation de départ
-    pthread_mutex_lock(a.mutex);
-    *(a.nb_thread_pret) += 1; // on incrémente le nombre de thread prêt
-    pthread_cond_broadcast(a.cond_inter_thread);
-    while (*(a.nb_thread_pret) < a.nb_thread){
-        pthread_cond_wait(a.cond_inter_thread, a.mutex);
+    /* Début du thread et synchronisation de départ*/
+
+    pthread_mutex_lock(&a.shared_arg->mutex); // <======== LOCK
+    a.shared_arg->nb_thread_pret += 1;
+    pthread_cond_broadcast(&a.shared_arg->cond_inter_thread);
+
+    while (a.shared_arg->nb_thread_pret < nb_thread){
+        pthread_cond_wait(&a.shared_arg->cond_inter_thread, &a.shared_arg->mutex);
     }
+
     printf("thread prêt\n");
-    *(a.nb_thread_pret) += 1; // on incrémente le nombre de thread prêt pour la boucle principale
-    pthread_mutex_unlock(a.mutex);
-    pthread_cond_signal(a.cond_principale);
 
-    //boucle principale
+    a.shared_arg->nb_thread_pret += 1;
+    pthread_mutex_unlock(&a.shared_arg->mutex); // <======== UNLOCK
+    pthread_cond_signal(&a.shared_arg->cond_principale);
 
-    while(*(a.stop) == FALSE){
-        pthread_mutex_lock(a.mutex);
-        while (*(a.print_iter) <= 0 && *(a.stop) == FALSE){
-            pthread_cond_wait(a.cond_inter_thread, a.mutex);
+
+    /* Boucle principale du thread */
+
+    while(a.shared_arg->stop == FALSE){
+        pthread_mutex_lock(&a.shared_arg->mutex); // <======== LOCK
+        while (a.shared_arg->print_iter <= 0 && a.shared_arg->stop == FALSE){
+            pthread_cond_wait(&a.shared_arg->cond_inter_thread, &a.shared_arg->mutex);
         }
 
-        if (*(a.stop) == TRUE && *(a.print_iter) <= 0){ // si le programme est terminé on sort de la boucle
-            pthread_mutex_unlock(a.mutex);
+        if (a.shared_arg->stop == TRUE && a.shared_arg->print_iter <= 0){/* si c'est le dernier à écrire */
+            pthread_mutex_unlock(&a.shared_arg->mutex); // <======== UNLOCK
             break;
         }
 
-        *(a.print_iter) -= 1;
-//        printf("Thread %d affiche : %s\n", num_thread,a.to_print);
-        printf("%s", a.to_print);
-        if (*(a.print_iter) == 0){ // si c'est le dernier thread à afficher on réveille tout le monde
-            pthread_cond_signal(a.cond_principale);
+        a.shared_arg->print_iter -= 1;
+
+        printf("%s", a.shared_arg->to_print);
+
+        if (a.shared_arg->print_iter == 0){ /* si c'est le dernier à écrire alors il signal le thread principal */
+            pthread_cond_signal(&a.shared_arg->cond_principale);
         }
-        pthread_mutex_unlock(a.mutex);
-        pthread_cond_broadcast(a.cond_inter_thread);
+
+        pthread_mutex_unlock(&a.shared_arg->mutex); // <======== UNLOCK
+        pthread_cond_broadcast(&a.shared_arg->cond_inter_thread);
         usleep (alea(delai_max, &seed) * 1000) ;
     }
 
@@ -110,6 +127,8 @@ void *fonction (void *arg){
 }
 
 int main(int argc, char *argv[]){
+
+    /* Vérification des arguments */
 
     if (argc != 4){
         raler(0, "usage: carre <délai-max> <nb-threads> <taille-côté>\n");
@@ -125,41 +144,36 @@ int main(int argc, char *argv[]){
 
     printf("début\n");
 
-    int nb_thread_pret = 0;
-    int stop = FALSE;
+    /* Initialisation des variables partagées */
 
-    pthread_t *tid ;
-    tid = calloc (nb_threads, sizeof (pthread_t));
+    struct shared_arg_t shared_arg;
+
+    shared_arg.nb_thread_pret = 0;
+    shared_arg.to_print = calloc(MAX_SIZE, sizeof(char));
+    shared_arg.print_iter = 0;
+    shared_arg.stop = FALSE;
+
+    TCHK(pthread_cond_init(&shared_arg.cond_inter_thread, NULL));
+    TCHK(pthread_cond_init(&shared_arg.cond_principale, NULL));
+
+    TCHK(pthread_mutex_init(&shared_arg.mutex, NULL));
+
+    /* Initialisation des arguments pour les threads */
 
     arg_t *arg;
     arg = calloc (nb_threads, sizeof (arg_t));
 
-    char *to_print = calloc(MAX_SIZE, sizeof(char));
-    int print_iter = 0;
-
-
-    pthread_cond_t cond_inter_thread;
-    pthread_cond_t cond_principale;
-
-    TCHK(pthread_cond_init(&cond_inter_thread, NULL));
-    TCHK(pthread_cond_init(&cond_principale, NULL));
-
-    pthread_mutex_t mutex;
-    TCHK(pthread_mutex_init(&mutex, NULL));
-
     //initialisation
     for (int i = 0; i < nb_threads; ++i) {
         arg[i].num_thread = i;
-        arg[i].nb_thread = nb_threads;
         arg[i].delai_max = delai_max;
-        arg[i].cond_inter_thread = &cond_inter_thread;
-        arg[i].cond_principale = &cond_principale;
-        arg[i].nb_thread_pret = &nb_thread_pret;
-        arg[i].mutex = &mutex;
-        arg[i].to_print = to_print;
-        arg[i].print_iter = &print_iter;
-        arg[i].stop = &stop;
+        arg[i].nb_thread = nb_threads;
+
+        arg[i].shared_arg = &shared_arg;
     }
+
+    pthread_t *tid ;
+    tid = calloc (nb_threads, sizeof (pthread_t));
 
 
     for (int i = 0; i < nb_threads; ++i) {
@@ -168,102 +182,102 @@ int main(int argc, char *argv[]){
 
 
     // synchronisation de départ
-    pthread_mutex_lock(&mutex);
-    while(nb_thread_pret < 2*nb_threads){
-        pthread_cond_wait(&cond_principale, &mutex);
+    pthread_mutex_lock(&shared_arg.mutex);
+    while(shared_arg.nb_thread_pret < 2*nb_threads){
+        pthread_cond_wait(&shared_arg.cond_principale, &shared_arg.mutex);
     }
-    nb_thread_pret = 0; // remise à zéro du nombre de thread prêt pour la boucle principale
-    pthread_mutex_unlock(&mutex);
+
+    pthread_mutex_unlock(&shared_arg.mutex);
 
     for (int i = 0; i < taille_cote + 2; ++i) {
         if (i == 0){ // cas particulier pour la première ligne
             for (int j = 0; j < 3; j++){
-                pthread_mutex_lock(&mutex);
+                pthread_mutex_lock(&shared_arg.mutex);
                 if (j == 0){
-                    strncpy(to_print, TL_CORNER, MAX_SIZE);
-                    print_iter = 1;
+                    strncpy(shared_arg.to_print, TL_CORNER, MAX_SIZE);
+                    shared_arg.print_iter = 1;
                 }else if (j == 2){
-                    strncpy(to_print, TR_CORNER, MAX_SIZE);
-                    print_iter = 1;
+                    strncpy(shared_arg.to_print, TR_CORNER, MAX_SIZE);
+                    shared_arg.print_iter = 1;
                 }else{
-                    strncpy(to_print, H_BARRE, MAX_SIZE);
-                    print_iter = taille_cote;
+                    strncpy(shared_arg.to_print, H_BARRE, MAX_SIZE);
+                    shared_arg.print_iter = taille_cote;
                 }
-                pthread_mutex_unlock(&mutex);
-                pthread_cond_broadcast(&cond_inter_thread);
+                pthread_mutex_unlock(&shared_arg.mutex);
+                pthread_cond_broadcast(&shared_arg.cond_inter_thread);
 
-                pthread_mutex_lock(&mutex);
-                while (print_iter > 0){
-                    pthread_cond_wait(&cond_principale, &mutex);
+                pthread_mutex_lock(&shared_arg.mutex);
+                while (shared_arg.print_iter > 0){
+                    pthread_cond_wait(&shared_arg.cond_principale, &shared_arg.mutex);
                 }
-                pthread_mutex_unlock(&mutex);
+                pthread_mutex_unlock(&shared_arg.mutex);
             }
         }else if (i == taille_cote + 1){ // cas particulier pour la dernière ligne
             for (int j = 0; j < 3; j++){
-                pthread_mutex_lock(&mutex);
+                pthread_mutex_lock(&shared_arg.mutex);
                 if (j == 0){
-                    strncpy(to_print, BL_CORNER, MAX_SIZE);
-                    print_iter = 1;
+                    strncpy(shared_arg.to_print, BL_CORNER, MAX_SIZE);
+                    shared_arg.print_iter = 1;
                 }else if (j == 2){
-                    strncpy(to_print, BR_CORNER, MAX_SIZE);
-                    print_iter = 1;
+                    strncpy(shared_arg.to_print, BR_CORNER, MAX_SIZE);
+                    shared_arg.print_iter = 1;
                 }else{
-                    strncpy(to_print, H_BARRE, MAX_SIZE);
-                    print_iter = taille_cote;
+                    strncpy(shared_arg.to_print, H_BARRE, MAX_SIZE);
+                    shared_arg.print_iter = taille_cote;
                 }
-                pthread_mutex_unlock(&mutex);
-                if (print_iter == 1){
-                    pthread_cond_signal(&cond_inter_thread);
+                pthread_mutex_unlock(&shared_arg.mutex);
+                if (shared_arg.print_iter == 1){
+                    pthread_cond_signal(&shared_arg.cond_inter_thread);
                 } else{
-                    pthread_cond_broadcast(&cond_inter_thread);
+                    pthread_cond_broadcast(&shared_arg.cond_inter_thread);
                 }
 
-                pthread_mutex_lock(&mutex);
-                while (print_iter > 0){
-                    pthread_cond_wait(&cond_principale, &mutex);
+                pthread_mutex_lock(&shared_arg.mutex);
+                while (shared_arg.print_iter > 0){
+                    pthread_cond_wait(&shared_arg.cond_principale, &shared_arg.mutex);
                 }
-                pthread_mutex_unlock(&mutex);
+                pthread_mutex_unlock(&shared_arg.mutex);
             }
         }else{
             for (int j = 0; j < 3; j++){
-                pthread_mutex_lock(&mutex);
+                pthread_mutex_lock(&shared_arg.mutex);
                 if (j == 0 || j == 2){
-                    strncpy(to_print, V_BARRE, MAX_SIZE);
-                    print_iter = 1;
+                    strncpy(shared_arg.to_print, V_BARRE, MAX_SIZE);
+                    shared_arg.print_iter = 1;
                 }else{
-                    strncpy(to_print, SPACE, MAX_SIZE);
-                    print_iter = taille_cote;
+                    strncpy(shared_arg.to_print, SPACE, MAX_SIZE);
+                    shared_arg.print_iter = taille_cote;
                 }
-                pthread_mutex_unlock(&mutex);
-                if (print_iter == 1){
-                    pthread_cond_signal(&cond_inter_thread);
+                pthread_mutex_unlock(&shared_arg.mutex);
+                if (shared_arg.print_iter == 1){
+                    pthread_cond_signal(&shared_arg.cond_inter_thread);
                 } else{
-                    pthread_cond_broadcast(&cond_inter_thread);
+                    pthread_cond_broadcast(&shared_arg.cond_inter_thread);
                 }
 
-                pthread_mutex_lock(&mutex);
-                while (print_iter > 0){
-                    pthread_cond_wait(&cond_principale, &mutex);
+                pthread_mutex_lock(&shared_arg.mutex);
+                while (shared_arg.print_iter > 0){
+                    pthread_cond_wait(&shared_arg.cond_principale, &shared_arg.mutex);
                 }
-                pthread_mutex_unlock(&mutex);
+                pthread_mutex_unlock(&shared_arg.mutex);
             }
         }
 
-        pthread_mutex_lock(&mutex);
-        strncpy(to_print, NEWLINE, MAX_SIZE);
-        print_iter = 1;
-        pthread_mutex_unlock(&mutex);
-        pthread_cond_signal(&cond_inter_thread);
+        pthread_mutex_lock(&shared_arg.mutex);
+        strncpy(shared_arg.to_print, NEWLINE, MAX_SIZE);
+        shared_arg.print_iter = 1;
+        pthread_mutex_unlock(&shared_arg.mutex);
+        pthread_cond_signal(&shared_arg.cond_inter_thread);
 
-        pthread_mutex_lock(&mutex);
-        while (print_iter > 0) {
-            pthread_cond_wait(&cond_principale, &mutex);
+        pthread_mutex_lock(&shared_arg.mutex);
+        while (shared_arg.print_iter > 0) {
+            pthread_cond_wait(&shared_arg.cond_principale, &shared_arg.mutex);
         }
         if (i == taille_cote + 1){
-            stop = TRUE;
-            pthread_cond_broadcast(&cond_inter_thread);
+            shared_arg.stop = TRUE;
+            pthread_cond_broadcast(&shared_arg.cond_inter_thread);
         }
-        pthread_mutex_unlock(&mutex);
+        pthread_mutex_unlock(&shared_arg.mutex);
 
     }
 
@@ -271,12 +285,12 @@ int main(int argc, char *argv[]){
         TCHK(pthread_join(tid[i], NULL));
     }
 
-    TCHK(pthread_cond_destroy(&cond_inter_thread));
-    TCHK(pthread_cond_destroy(&cond_principale));
-    TCHK(pthread_mutex_destroy(&mutex));
+    TCHK(pthread_cond_destroy(&shared_arg.cond_inter_thread));
+    TCHK(pthread_cond_destroy(&shared_arg.cond_principale));
+    TCHK(pthread_mutex_destroy(&shared_arg.mutex));
 
     free(tid);
-    free(to_print);
+    free(shared_arg.to_print);
     free(arg);
 
     return 0;
