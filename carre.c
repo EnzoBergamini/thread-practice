@@ -110,6 +110,7 @@ void *fonction (void *arg){
 }
 
 int main(int argc, char *argv[]){
+
     if (argc != 4){
         raler(0, "usage: carre <délai-max> <nb-threads> <taille-côté>\n");
     }
@@ -121,6 +122,8 @@ int main(int argc, char *argv[]){
     if (delai_max < 0 || nb_threads <= 0 || taille_cote < 0){
         raler(0, "usage: carre <délai-max> <nb-threads> <taille-côté>\n");
     }
+
+    printf("début\n");
 
     int nb_thread_pret = 0;
     int stop = FALSE;
@@ -158,7 +161,6 @@ int main(int argc, char *argv[]){
         arg[i].stop = &stop;
     }
 
-    printf("début\n");
 
     for (int i = 0; i < nb_threads; ++i) {
         TCHK(pthread_create(&tid[i], NULL, fonction, &arg[i]));
