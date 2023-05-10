@@ -66,10 +66,8 @@ void *fonction (void *arg){
     int delai_max = a.delai_max;
     int num_thread = a.num_thread;
     unsigned int seed = num_thread;
-    int delai = alea(delai_max, &seed);
 
-    printf("Je suis le thread %d j'attends %d secondes\n", num_thread ,delai);
-    sleep(delai);
+    usleep (alea(delai_max, &seed) * 1000); // on attend un temps aléatoire entre 0 et delai_max au début
 
     // synchronisation de départ
     pthread_mutex_lock(a.mutex);
@@ -78,7 +76,7 @@ void *fonction (void *arg){
     while (*(a.nb_thread_pret) < a.nb_thread){
         pthread_cond_wait(a.cond_inter_thread, a.mutex);
     }
-    printf("thread %d prêt\n", num_thread);
+    printf("thread prêt\n");
     *(a.nb_thread_pret) += 1; // on incrémente le nombre de thread prêt pour la boucle principale
     pthread_mutex_unlock(a.mutex);
     pthread_cond_signal(a.cond_principale);
@@ -87,41 +85,42 @@ void *fonction (void *arg){
 
     while(*(a.stop) == FALSE){
         pthread_mutex_lock(a.mutex);
-        while (*(a.print_iter) <= 0
-            && *(a.stop) == FALSE   // si on a pas encore affiché et que le programme n'est pas terminé
-            ){
+        while (*(a.print_iter) <= 0){
             pthread_cond_wait(a.cond_inter_thread, a.mutex);
         }
 
-        if (*(a.stop) == TRUE){ // si le programme est terminé on sort de la boucle
+        if (*(a.stop) == TRUE && *(a.print_iter) <= 0){ // si le programme est terminé on sort de la boucle
             pthread_mutex_unlock(a.mutex);
             break;
         }
 
         *(a.print_iter) -= 1;
-        printf("Thread %d affiche : %s\n", num_thread,a.to_print);
-//        printf("%s", a.to_print);
+//        printf("Thread %d affiche : %s\n", num_thread,a.to_print);
+        printf("%s", a.to_print);
         if (*(a.print_iter) == 0){ // si c'est le dernier thread à afficher on réveille tout le monde
             pthread_cond_signal(a.cond_principale);
         }
         pthread_mutex_unlock(a.mutex);
         pthread_cond_broadcast(a.cond_inter_thread);
-        sleep(alea(delai_max, &seed));
+        usleep (alea(delai_max, &seed) * 1000) ;
     }
 
-
+    printf("thread terminé\n");
     return NULL;
 }
 
 int main(int argc, char *argv[]){
     if (argc != 4){
-        fprintf(stderr, "Usage: %s <délai-max> <nb-threads> <taille-côté>\n", argv[0]);
-        exit(EXIT_FAILURE);
+        raler(0, "usage: carre <délai-max> <nb-threads> <taille-côté>\n");
     }
 
     int delai_max = atoi(argv[1]);
     int nb_threads = atoi(argv[2]);
     int taille_cote = atoi(argv[3]);
+
+    if (delai_max < 0 || nb_threads <= 0 || taille_cote < 0){
+        raler(0, "usage: carre <délai-max> <nb-threads> <taille-côté>\n");
+    }
 
     int nb_thread_pret = 0;
     int stop = FALSE;
@@ -159,11 +158,12 @@ int main(int argc, char *argv[]){
         arg[i].stop = &stop;
     }
 
+    printf("début\n");
+
     for (int i = 0; i < nb_threads; ++i) {
         TCHK(pthread_create(&tid[i], NULL, fonction, &arg[i]));
     }
 
-    printf("début\n");
 
     // synchronisation de départ
     pthread_mutex_lock(&mutex);
@@ -172,9 +172,6 @@ int main(int argc, char *argv[]){
     }
     nb_thread_pret = 0; // remise à zéro du nombre de thread prêt pour la boucle principale
     pthread_mutex_unlock(&mutex);
-    printf("début de la synchro avec les threads\n");
-
-    //boucle principale
 
     for (int i = 0; i < taille_cote + 2; ++i) {
         if (i == 0){ // cas particulier pour la première ligne
@@ -213,7 +210,11 @@ int main(int argc, char *argv[]){
                     print_iter = taille_cote;
                 }
                 pthread_mutex_unlock(&mutex);
-                pthread_cond_broadcast(&cond_inter_thread);
+                if (print_iter == 1){
+                    pthread_cond_signal(&cond_inter_thread);
+                } else{
+                    pthread_cond_broadcast(&cond_inter_thread);
+                }
 
                 pthread_mutex_lock(&mutex);
                 while (print_iter > 0){
@@ -232,7 +233,11 @@ int main(int argc, char *argv[]){
                     print_iter = taille_cote;
                 }
                 pthread_mutex_unlock(&mutex);
-                pthread_cond_broadcast(&cond_inter_thread);
+                if (print_iter == 1){
+                    pthread_cond_signal(&cond_inter_thread);
+                } else{
+                    pthread_cond_broadcast(&cond_inter_thread);
+                }
 
                 pthread_mutex_lock(&mutex);
                 while (print_iter > 0){
@@ -242,27 +247,26 @@ int main(int argc, char *argv[]){
             }
         }
 
+        pthread_mutex_lock(&mutex);
+        strncpy(to_print, NEWLINE, MAX_SIZE);
+        print_iter = 1;
+        pthread_mutex_unlock(&mutex);
+        pthread_cond_signal(&cond_inter_thread);
+
+        pthread_mutex_lock(&mutex);
+        while (print_iter > 0) {
+            pthread_cond_wait(&cond_principale, &mutex);
+        }
         if (i == taille_cote + 1){
             stop = TRUE;
             pthread_cond_broadcast(&cond_inter_thread);
-        }else {
-            pthread_mutex_lock(&mutex);
-            strncpy(to_print, NEWLINE, MAX_SIZE);
-            print_iter = 1;
-            pthread_mutex_unlock(&mutex);
-            pthread_cond_broadcast(&cond_inter_thread);
-
-            pthread_mutex_lock(&mutex);
-            while (print_iter > 0) {
-                pthread_cond_wait(&cond_principale, &mutex);
-            }
-            pthread_mutex_unlock(&mutex);
         }
+        pthread_mutex_unlock(&mutex);
+
     }
 
     for (int i = 0; i < nb_threads; ++i) {
         TCHK(pthread_join(tid[i], NULL));
-        printf("thread %d terminé\n", i);
     }
 
     TCHK(pthread_cond_destroy(&cond_inter_thread));
