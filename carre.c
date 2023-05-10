@@ -37,7 +37,10 @@ void raler (int syserr, const char *msg, ...)
 #define V_BARRE "\xe2\x94\x82"
 #define SPACE " "
 #define NEWLINE "\n"
+
 #define MAX_SIZE 10
+#define TRUE 1
+#define FALSE 0
 
 typedef struct arg_t {
     int num_thread;
@@ -46,7 +49,7 @@ typedef struct arg_t {
     int nb_thread;
 
     char *to_print;
-    int print_iter;
+    int *print_iter;
 
     pthread_cond_t *cond_inter_thread;
     pthread_cond_t *cond_principale;
@@ -86,10 +89,15 @@ void *fonction (void *arg){
 
     while(1){
         pthread_mutex_lock(a.mutex);
-        while (a.print_iter == 0){
+        while (*(a.print_iter) <= 0){
             pthread_cond_wait(a.cond_principale, a.mutex);
         }
+
+        *(a.print_iter) -= 1;
+        //        printf("Thread %d affiche : %s\n", num_thread,a.to_print);
+        printf("%s", a.to_print);
         pthread_mutex_unlock(a.mutex);
+        pthread_cond_broadcast(a.cond_principale);
     }
 
 
@@ -136,6 +144,8 @@ int main(int argc, char *argv[]){
         arg[i].cond_principale = &cond_principale;
         arg[i].nb_thread_pret = &nb_thread_pret;
         arg[i].mutex = &mutex;
+        arg[i].to_print = to_print;
+        arg[i].print_iter = &print_iter;
     }
 
     for (int i = 0; i < nb_threads; ++i) {
@@ -158,6 +168,7 @@ int main(int argc, char *argv[]){
     for (int i = 0; i < taille_cote + 2; ++i) {
         if (i == 0){ // cas particulier pour la première ligne
             for (int j = 0; j < 3; j++){
+                pthread_mutex_lock(&mutex);
                 if (j == 0){
                     strncpy(to_print, TL_CORNER, MAX_SIZE);
                     print_iter = 1;
@@ -168,9 +179,18 @@ int main(int argc, char *argv[]){
                     strncpy(to_print, H_BARRE, MAX_SIZE);
                     print_iter = taille_cote;
                 }
+                pthread_mutex_unlock(&mutex);
+                pthread_cond_broadcast(&cond_principale);
+
+                pthread_mutex_lock(&mutex);
+                while (print_iter > 0){
+                    pthread_cond_wait(&cond_principale, &mutex);
+                }
+                pthread_mutex_unlock(&mutex);
             }
         }else if (i == taille_cote + 1){ // cas particulier pour la dernière ligne
             for (int j = 0; j < 3; j++){
+                pthread_mutex_lock(&mutex);
                 if (j == 0){
                     strncpy(to_print, BL_CORNER, MAX_SIZE);
                     print_iter = 1;
@@ -181,9 +201,18 @@ int main(int argc, char *argv[]){
                     strncpy(to_print, H_BARRE, MAX_SIZE);
                     print_iter = taille_cote;
                 }
+                pthread_mutex_unlock(&mutex);
+                pthread_cond_broadcast(&cond_principale);
+
+                pthread_mutex_lock(&mutex);
+                while (print_iter > 0){
+                    pthread_cond_wait(&cond_principale, &mutex);
+                }
+                pthread_mutex_unlock(&mutex);
             }
         }else{
             for (int j = 0; j < 3; j++){
+                pthread_mutex_lock(&mutex);
                 if (j == 0 || j == 2){
                     strncpy(to_print, V_BARRE, MAX_SIZE);
                     print_iter = 1;
@@ -191,10 +220,28 @@ int main(int argc, char *argv[]){
                     strncpy(to_print, SPACE, MAX_SIZE);
                     print_iter = taille_cote;
                 }
+                pthread_mutex_unlock(&mutex);
+                pthread_cond_broadcast(&cond_principale);
+
+                pthread_mutex_lock(&mutex);
+                while (print_iter > 0){
+                    pthread_cond_wait(&cond_principale, &mutex);
+                }
+                pthread_mutex_unlock(&mutex);
             }
         }
+
+        pthread_mutex_lock(&mutex);
         strncpy(to_print, NEWLINE, MAX_SIZE);
         print_iter = 1;
+        pthread_mutex_unlock(&mutex);
+        pthread_cond_broadcast(&cond_principale);
+
+        pthread_mutex_lock(&mutex);
+        while (print_iter > 0){
+            pthread_cond_wait(&cond_principale, &mutex);
+        }
+        pthread_mutex_unlock(&mutex);
     }
 
 
