@@ -56,11 +56,8 @@ typedef struct arg_t {
     pthread_mutex_t *mutex;
 } arg_t;
 
-int alea (int max, unsigned int *seed)
-{
-    (void) seed;
-//    return max * (rand_r (seed) / ((double) RAND_MAX + 1)) ;
-    return rand() % max;
+int alea (int max, unsigned int *seed){
+    return max * (rand_r (seed) / ((double) RAND_MAX + 1)) ;
 }
 
 void *fonction (void *arg){
@@ -83,21 +80,25 @@ void *fonction (void *arg){
     printf("thread %d prêt\n", num_thread);
     *(a.nb_thread_pret) += 1; // on incrémente le nombre de thread prêt pour la boucle principale
     pthread_mutex_unlock(a.mutex);
-    pthread_cond_broadcast(a.cond_principale);
+    pthread_cond_signal(a.cond_principale);
 
     //boucle principale
 
     while(1){
         pthread_mutex_lock(a.mutex);
         while (*(a.print_iter) <= 0){
-            pthread_cond_wait(a.cond_principale, a.mutex);
+            pthread_cond_wait(a.cond_inter_thread, a.mutex);
         }
 
         *(a.print_iter) -= 1;
-        //        printf("Thread %d affiche : %s\n", num_thread,a.to_print);
-        printf("%s", a.to_print);
+        printf("Thread %d affiche : %s\n", num_thread,a.to_print);
+//        printf("%s", a.to_print);
+        if (*(a.print_iter) == 0){ // si c'est le dernier thread à afficher on réveille tout le monde
+            pthread_cond_signal(a.cond_principale);
+        }
         pthread_mutex_unlock(a.mutex);
-        pthread_cond_broadcast(a.cond_principale);
+        pthread_cond_broadcast(a.cond_inter_thread);
+        sleep(alea(delai_max, &seed));
     }
 
 
@@ -180,7 +181,7 @@ int main(int argc, char *argv[]){
                     print_iter = taille_cote;
                 }
                 pthread_mutex_unlock(&mutex);
-                pthread_cond_broadcast(&cond_principale);
+                pthread_cond_broadcast(&cond_inter_thread);
 
                 pthread_mutex_lock(&mutex);
                 while (print_iter > 0){
@@ -202,7 +203,7 @@ int main(int argc, char *argv[]){
                     print_iter = taille_cote;
                 }
                 pthread_mutex_unlock(&mutex);
-                pthread_cond_broadcast(&cond_principale);
+                pthread_cond_broadcast(&cond_inter_thread);
 
                 pthread_mutex_lock(&mutex);
                 while (print_iter > 0){
@@ -221,7 +222,7 @@ int main(int argc, char *argv[]){
                     print_iter = taille_cote;
                 }
                 pthread_mutex_unlock(&mutex);
-                pthread_cond_broadcast(&cond_principale);
+                pthread_cond_broadcast(&cond_inter_thread);
 
                 pthread_mutex_lock(&mutex);
                 while (print_iter > 0){
@@ -235,7 +236,7 @@ int main(int argc, char *argv[]){
         strncpy(to_print, NEWLINE, MAX_SIZE);
         print_iter = 1;
         pthread_mutex_unlock(&mutex);
-        pthread_cond_broadcast(&cond_principale);
+        pthread_cond_broadcast(&cond_inter_thread);
 
         pthread_mutex_lock(&mutex);
         while (print_iter > 0){
@@ -243,8 +244,6 @@ int main(int argc, char *argv[]){
         }
         pthread_mutex_unlock(&mutex);
     }
-
-
 
 
     for (int i = 0; i < nb_threads; ++i) {
