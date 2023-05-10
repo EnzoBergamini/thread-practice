@@ -160,7 +160,7 @@ int main(int argc, char *argv[]){
     while(nb_thread_pret < 2*nb_threads){
         pthread_cond_wait(&cond_principale, &mutex);
     }
-    nb_threads = 0; // remise à zéro du nombre de thread prêt pour la boucle principale
+    nb_thread_pret = 0; // remise à zéro du nombre de thread prêt pour la boucle principale
     pthread_mutex_unlock(&mutex);
     printf("début de la synchro avec les threads\n");
 
@@ -245,9 +245,9 @@ int main(int argc, char *argv[]){
         pthread_mutex_unlock(&mutex);
     }
 
-
     for (int i = 0; i < nb_threads; ++i) {
         TCHK(pthread_join(tid[i], NULL));
+        printf("thread %d terminé\n", i);
     }
 
     TCHK(pthread_cond_destroy(&cond_inter_thread));
